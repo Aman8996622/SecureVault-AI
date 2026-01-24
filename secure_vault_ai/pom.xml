@@ -9,7 +9,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>4.0.0</version>
+        <version>3.4.1</version>
     </parent>
 
     <groupId>com.example</groupId>
@@ -53,6 +53,18 @@
             <artifactId>flyway-core</artifactId>
         </dependency>
 
+        <!-- PostgreSQL database support for Flyway 10+ -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+
+        <!-- Caching -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-cache</artifactId>
+        </dependency>
+
         <!-- Redis -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -63,6 +75,13 @@
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-pool2</artifactId>
+        </dependency>
+
+        <!-- H2 Database for Testing -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>test</scope>
         </dependency>
 
         <!-- Tests -->

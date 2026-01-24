@@ -31,3 +31,17 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### OS Specific Files ###
+.DS_Store
+Thumbs.db
+
+### Logs ###
+*.log
+
+### Sensitive/Local Config ###
+.env
+application-local.properties
+*.jks
+*.p12
+

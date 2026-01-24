@@ -1,0 +1,46 @@
+pipeline {
+    agent any
+
+    environment {
+        APP_NAME = 'secure-vault-ai'
+        IMAGE_TAG = 'latest'
+    }
+
+    stages {
+        stage('Build') {
+            steps {
+                script {
+                    // Ensure the Maven wrapper is executable
+                    sh 'chmod +x mvnw'
+                    // Build the application skipping tests (tests are run in the next stage)
+                    sh './mvnw clean package -DskipTests'
+                }
+            }
+        }
+
+        stage('Test') {
+            steps {
+                script {
+                    sh './mvnw test'
+                }
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
+                script {
+                    sh "docker build -t ${APP_NAME}:${IMAGE_TAG} ."
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+        }
+        failure {
+            echo 'Pipeline failed. Please check the logs.'
+        }
+    }
+}
