@@ -18,8 +18,7 @@ pipeline {
 
         REQUIRED_SPRING_VERSION = "3.4.1"
         REQUIRED_JAVA_VERSION   = "17"
-
-        # Non-sensitive env file path
+        
         ENV_FILE = ".env"
     }
 
