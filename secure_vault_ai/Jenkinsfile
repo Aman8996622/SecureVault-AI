@@ -40,7 +40,7 @@ pipeline {
                 script {
                     echo "Checking Spring Boot version..."
                     def springVersion = sh(
-                        script: "grep -m1 '<version>' pom.xml | head -1 | sed -E 's/.*<version>(.*)<\\/version>.*/\\1/'",
+                        script: "grep -m1 '<version>' secure_vault_ai/pom.xml | head -1 | sed -E 's/.*<version>(.*)<\\/version>.*/\\1/'",
                         returnStdout: true
                     ).trim()
                     if (springVersion != REQUIRED_SPRING_VERSION) {
