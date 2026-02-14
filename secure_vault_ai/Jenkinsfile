@@ -19,6 +19,10 @@ pipeline {
         REQUIRED_SPRING_VERSION = "3.4.1"
         REQUIRED_JAVA_VERSION   = "17"
         ENV_FILE = "secure_vault_ai/.env"
+
+        // macOS full paths for AWS CLI and Docker
+        AWS_CLI = "/opt/homebrew/bin/aws"
+        DOCKER  = "/usr/local/bin/docker"
     }
 
     stages {
@@ -73,8 +77,8 @@ pipeline {
                     sh """
                         mkdir -p ~/.docker
                         echo '{"credsStore": ""}' > ~/.docker/config.json
-                        aws ecr get-login-password --region ${AWS_REGION} | \
-                        docker login --username AWS --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+                        ${AWS_CLI} ecr get-login-password --region ${AWS_REGION} | \
+                        ${DOCKER} login --username AWS --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
                     """
                 }
             }
@@ -83,14 +87,14 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 dir('secure_vault_ai') {
-                    sh "docker build -t ${IMAGE_URI} ."
+                    sh "${DOCKER} build -t ${IMAGE_URI} ."
                 }
             }
         }
 
         stage('Push Docker Image') {
             steps {
-                sh "docker push ${IMAGE_URI}"
+                sh "${DOCKER} push ${IMAGE_URI}"
             }
         }
 
@@ -103,12 +107,12 @@ pipeline {
                     ]) {
                         sh """
                         ssh -o StrictHostKeyChecking=no ${EC2_HOST} '
-                            aws ecr get-login-password --region ${AWS_REGION} | \
-                            docker login --username AWS --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com &&
-                            docker stop securevault || true &&
-                            docker rm securevault || true &&
-                            docker pull ${IMAGE_URI} &&
-                            docker run -d --name securevault \
+                            ${AWS_CLI} ecr get-login-password --region ${AWS_REGION} | \
+                            ${DOCKER} login --username AWS --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com &&
+                            ${DOCKER} stop securevault || true &&
+                            ${DOCKER} rm securevault || true &&
+                            ${DOCKER} pull ${IMAGE_URI} &&
+                            ${DOCKER} run -d --name securevault \
                               --env-file ${ENV_FILE} \
                               -e SPRING_DATASOURCE_PASSWORD=$PG_PASS \
                               -e SPRING_DATA_MONGODB_URI="mongodb+srv://flaman:$MONGO_PASS@securevaultai.mx0qhvx.mongodb.net?retryWrites=true&w=majority" \
