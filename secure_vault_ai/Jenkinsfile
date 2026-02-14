@@ -90,8 +90,11 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                dir('secure_vault_ai') {
-                    sh "${LOCAL_DOCKER} build -t ${IMAGE_URI} ."
+                 dir('secure_vault_ai') {
+                    // Build specifically for Linux AMD64 so EC2 can run it
+                    sh """
+                        ${LOCAL_DOCKER} build --platform linux/amd64 -t ${IMAGE_URI} .
+                    """
                 }
             }
         }
