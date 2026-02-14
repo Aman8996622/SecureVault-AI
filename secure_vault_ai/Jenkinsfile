@@ -2,8 +2,8 @@ pipeline {
     agent any
 
     tools {
-        maven 'Maven3'     // configure in Jenkins Global Tools
-        jdk 'JDK17'        // configure in Jenkins Global Tools
+        maven 'Maven3'     // Jenkins Global Tools
+        jdk 'JDK17'
     }
 
     environment {
@@ -14,81 +14,61 @@ pipeline {
         IMAGE_TAG  = "${BUILD_NUMBER}"
         IMAGE_URI  = "${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${IMAGE_TAG}"
 
-        EC2_HOST   = "ubuntu@43.204.97.201"
+        EC2_HOST   = "ubuntu@13.233.32.204"
 
         REQUIRED_SPRING_VERSION = "3.4.1"
         REQUIRED_JAVA_VERSION   = "17"
+
+        # Non-sensitive env file path
+        ENV_FILE = ".env"
     }
 
     stages {
 
-        // =========================
-        // Clean
-        // =========================
         stage('Clean Workspace') {
             steps {
                 cleanWs()
             }
         }
 
-        // =========================
-        // Checkout
-        // =========================
         stage('Checkout Code') {
             steps {
                 checkout scm
             }
         }
 
-        // =========================
-        // Version Validation (NEW)
-        // =========================
         stage('Validate Versions') {
             steps {
                 script {
-
                     echo "Checking Spring Boot version..."
-
                     def springVersion = sh(
-                        script: "grep -oPm1 '(?<=<version>)[^<]+' pom.xml | head -1",
+                        script: "grep -m1 '<version>' pom.xml | head -1 | sed -E 's/.*<version>(.*)<\\/version>.*/\\1/'",
                         returnStdout: true
                     ).trim()
-
                     if (springVersion != REQUIRED_SPRING_VERSION) {
                         error "❌ Spring Boot version mismatch. Found: ${springVersion}, Required: ${REQUIRED_SPRING_VERSION}"
                     }
-
                     echo "✅ Spring Boot version OK: ${springVersion}"
 
-
                     echo "Checking Java version..."
-
                     def javaVersion = sh(
                         script: "java -version 2>&1 | head -n 1",
                         returnStdout: true
                     ).trim()
-
                     if (!javaVersion.contains(REQUIRED_JAVA_VERSION)) {
                         error "❌ Java version mismatch. Required Java ${REQUIRED_JAVA_VERSION}"
                     }
-
                     echo "✅ ${javaVersion}"
                 }
             }
         }
 
-        // =========================
-        // Build JAR
-        // =========================
         stage('Build JAR') {
             steps {
                 sh 'mvn clean package -DskipTests'
             }
         }
 
-        // =========================
-        // Login to ECR
-        // =========================
         stage('Login to AWS ECR') {
             steps {
                 withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-creds']]) {
@@ -100,9 +80,6 @@ pipeline {
             }
         }
 
-        // =========================
-        // Docker Build
-        // =========================
         stage('Build Docker Image') {
             steps {
                 sh """
@@ -111,45 +88,44 @@ pipeline {
             }
         }
 
-        // =========================
-        // Push Image
-        // =========================
         stage('Push Docker Image') {
             steps {
                 sh "docker push ${IMAGE_URI}"
             }
         }
 
-        // =========================
-        // Deploy to EC2
-        // =========================
         stage('Deploy to EC2') {
             steps {
                 sshagent(['ec2-ssh-key']) {
-                    sh """
-                    ssh -o StrictHostKeyChecking=no ${EC2_HOST} '
-                        aws ecr get-login-password --region ${AWS_REGION} | \
-                        docker login --username AWS --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com &&
+                    withCredentials([
+                        string(credentialsId: 'POSTGRES_PASSWORD', variable: 'PG_PASS'),
+                        string(credentialsId: 'MONGO_PASSWORD', variable: 'MONGO_PASS')
+                    ]) {
+                        sh """
+                        ssh -o StrictHostKeyChecking=no ${EC2_HOST} '
+                            aws ecr get-login-password --region ${AWS_REGION} | \
+                            docker login --username AWS --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com &&
 
-                        docker stop securevault || true &&
-                        docker rm securevault || true &&
+                            docker stop securevault || true &&
+                            docker rm securevault || true &&
 
-                        docker pull ${IMAGE_URI} &&
+                            docker pull ${IMAGE_URI} &&
 
-                        docker run -d \
-                          --name securevault \
-                          -p 8080:8080 \
-                          ${IMAGE_URI}
-                    '
-                    """
+                            docker run -d \
+                              --name securevault \
+                              --env-file ${ENV_FILE} \
+                              -e SPRING_DATASOURCE_PASSWORD=$PG_PASS \
+                              -e SPRING_DATA_MONGODB_URI="mongodb+srv://flaman:$MONGO_PASS@securevaultai.mx0qhvx.mongodb.net?retryWrites=true&w=majority" \
+                              -p 8080:4000 \
+                              ${IMAGE_URI}
+                        '
+                        """
+                    }
                 }
             }
         }
     }
 
-    // =========================
-    // Post Actions
-    // =========================
     post {
         success {
             echo "✅ Deployment Successful"
