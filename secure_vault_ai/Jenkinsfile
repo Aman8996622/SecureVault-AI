@@ -1,46 +1,161 @@
 pipeline {
     agent any
 
+    tools {
+        maven 'Maven3'     // configure in Jenkins Global Tools
+        jdk 'JDK17'        // configure in Jenkins Global Tools
+    }
+
     environment {
-        APP_NAME = 'secure-vault-ai'
-        IMAGE_TAG = 'latest'
+        AWS_REGION = "ap-south-1"
+        ACCOUNT_ID = "426315020355"
+        ECR_REPO   = "securevault"
+
+        IMAGE_TAG  = "${BUILD_NUMBER}"
+        IMAGE_URI  = "${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${IMAGE_TAG}"
+
+        EC2_HOST   = "ubuntu@43.204.97.201"
+
+        REQUIRED_SPRING_VERSION = "3.4.1"
+        REQUIRED_JAVA_VERSION   = "17"
     }
 
     stages {
-        stage('Build') {
+
+        // =========================
+        // Clean
+        // =========================
+        stage('Clean Workspace') {
+            steps {
+                cleanWs()
+            }
+        }
+
+        // =========================
+        // Checkout
+        // =========================
+        stage('Checkout Code') {
+            steps {
+                checkout scm
+            }
+        }
+
+        // =========================
+        // Version Validation (NEW)
+        // =========================
+        stage('Validate Versions') {
             steps {
                 script {
-                    // Ensure the Maven wrapper is executable
-                    sh 'chmod +x mvnw'
-                    // Build the application skipping tests (tests are run in the next stage)
-                    sh './mvnw clean package -DskipTests'
+
+                    echo "Checking Spring Boot version..."
+
+                    def springVersion = sh(
+                        script: "grep -oPm1 '(?<=<version>)[^<]+' pom.xml | head -1",
+                        returnStdout: true
+                    ).trim()
+
+                    if (springVersion != REQUIRED_SPRING_VERSION) {
+                        error "❌ Spring Boot version mismatch. Found: ${springVersion}, Required: ${REQUIRED_SPRING_VERSION}"
+                    }
+
+                    echo "✅ Spring Boot version OK: ${springVersion}"
+
+
+                    echo "Checking Java version..."
+
+                    def javaVersion = sh(
+                        script: "java -version 2>&1 | head -n 1",
+                        returnStdout: true
+                    ).trim()
+
+                    if (!javaVersion.contains(REQUIRED_JAVA_VERSION)) {
+                        error "❌ Java version mismatch. Required Java ${REQUIRED_JAVA_VERSION}"
+                    }
+
+                    echo "✅ ${javaVersion}"
                 }
             }
         }
 
-        stage('Test') {
+        // =========================
+        // Build JAR
+        // =========================
+        stage('Build JAR') {
             steps {
-                script {
-                    sh './mvnw test'
+                sh 'mvn clean package -DskipTests'
+            }
+        }
+
+        // =========================
+        // Login to ECR
+        // =========================
+        stage('Login to AWS ECR') {
+            steps {
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-creds']]) {
+                    sh """
+                        aws ecr get-login-password --region ${AWS_REGION} | \
+                        docker login --username AWS --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+                    """
                 }
             }
         }
 
-        stage('Docker Build') {
+        // =========================
+        // Docker Build
+        // =========================
+        stage('Build Docker Image') {
             steps {
-                script {
-                    sh "docker build -t ${APP_NAME}:${IMAGE_TAG} ."
+                sh """
+                    docker build --platform linux/amd64 -t ${IMAGE_URI} .
+                """
+            }
+        }
+
+        // =========================
+        // Push Image
+        // =========================
+        stage('Push Docker Image') {
+            steps {
+                sh "docker push ${IMAGE_URI}"
+            }
+        }
+
+        // =========================
+        // Deploy to EC2
+        // =========================
+        stage('Deploy to EC2') {
+            steps {
+                sshagent(['ec2-ssh-key']) {
+                    sh """
+                    ssh -o StrictHostKeyChecking=no ${EC2_HOST} '
+                        aws ecr get-login-password --region ${AWS_REGION} | \
+                        docker login --username AWS --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com &&
+
+                        docker stop securevault || true &&
+                        docker rm securevault || true &&
+
+                        docker pull ${IMAGE_URI} &&
+
+                        docker run -d \
+                          --name securevault \
+                          -p 8080:8080 \
+                          ${IMAGE_URI}
+                    '
+                    """
                 }
             }
         }
     }
 
+    // =========================
+    // Post Actions
+    // =========================
     post {
         success {
-            archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+            echo "✅ Deployment Successful"
         }
         failure {
-            echo 'Pipeline failed. Please check the logs.'
+            echo "❌ Deployment Failed"
         }
     }
 }
