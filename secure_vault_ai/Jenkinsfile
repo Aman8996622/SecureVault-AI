@@ -17,6 +17,7 @@ pipeline {
         EC2_HOST   = "ubuntu@13.233.32.204"
 
         REQUIRED_SPRING_VERSION = "3.4.1"
+        
         REQUIRED_JAVA_VERSION   = "17"
         ENV_FILE = "secure_vault_ai/.env"  // path relative to repo root
     }
