@@ -1,14 +1,14 @@
 # =========================
 # Build Stage
 # =========================
-FROM --platform=linux/amd64 maven:3.9.6-eclipse-temurin-17 AS build
+FROM maven:3.9.6-eclipse-temurin-17 AS build
 
 WORKDIR /app
 
 # Copy only pom.xml first for caching
-COPY pom.xml .docker compose up -d
+COPY pom.xml .
 
-# Download dependencies
+# Download dependencies (offline mode)
 RUN mvn dependency:go-offline
 
 # Copy source code
@@ -20,7 +20,7 @@ RUN mvn clean package -DskipTests
 # =========================
 # Run Stage
 # =========================
-FROM --platform=linux/amd64 eclipse-temurin:17-jre
+FROM eclipse-temurin:17-jre
 
 WORKDIR /app
 
