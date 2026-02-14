@@ -3,7 +3,7 @@ pipeline {
 
     tools {
         maven 'Maven3'     // Jenkins Global Tools
-        jdk 'JDK17'
+        jdk 'JDK17'        // Make sure JDK17 is configured in Jenkins Global Tools
     }
 
     environment {
@@ -18,7 +18,7 @@ pipeline {
 
         REQUIRED_SPRING_VERSION = "3.4.1"
         REQUIRED_JAVA_VERSION   = "17"
-        ENV_FILE = ".env"
+        ENV_FILE = "secure_vault_ai/.env"  // path relative to repo root
     }
 
     stages {
@@ -43,6 +43,7 @@ pipeline {
                         script: "grep -m1 '<version>' secure_vault_ai/pom.xml | head -1 | sed -E 's/.*<version>(.*)<\\/version>.*/\\1/'",
                         returnStdout: true
                     ).trim()
+
                     if (springVersion != REQUIRED_SPRING_VERSION) {
                         error "❌ Spring Boot version mismatch. Found: ${springVersion}, Required: ${REQUIRED_SPRING_VERSION}"
                     }
@@ -53,6 +54,7 @@ pipeline {
                         script: "java -version 2>&1 | head -n 1",
                         returnStdout: true
                     ).trim()
+
                     if (!javaVersion.contains(REQUIRED_JAVA_VERSION)) {
                         error "❌ Java version mismatch. Required Java ${REQUIRED_JAVA_VERSION}"
                     }
@@ -63,7 +65,9 @@ pipeline {
 
         stage('Build JAR') {
             steps {
-                sh 'mvn clean package -DskipTests'
+                dir('secure_vault_ai') {
+                    sh 'mvn clean package -DskipTests'
+                }
             }
         }
 
@@ -80,9 +84,11 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                sh """
-                    docker build --platform linux/amd64 -t ${IMAGE_URI} .
-                """
+                dir('secure_vault_ai') {
+                    sh """
+                        docker build --platform linux/amd64 -t ${IMAGE_URI} .
+                    """
+                }
             }
         }
 
@@ -114,7 +120,7 @@ pipeline {
                               --env-file ${ENV_FILE} \
                               -e SPRING_DATASOURCE_PASSWORD=$PG_PASS \
                               -e SPRING_DATA_MONGODB_URI="mongodb+srv://flaman:$MONGO_PASS@securevaultai.mx0qhvx.mongodb.net?retryWrites=true&w=majority" \
-                              -p 8080:4000 \
+                              -p 4000:4000 \
                               ${IMAGE_URI}
                         '
                         """
