@@ -2,8 +2,8 @@ pipeline {
     agent any
 
     tools {
-        maven 'Maven3'     // Jenkins Global Tools
-        jdk 'JDK17'        // Make sure JDK17 is configured in Jenkins Global Tools
+        maven 'Maven3'
+        jdk 'JDK17'
     }
 
     environment {
@@ -18,11 +18,10 @@ pipeline {
 
         REQUIRED_SPRING_VERSION = "3.4.1"
         REQUIRED_JAVA_VERSION   = "17"
-        ENV_FILE = "secure_vault_ai/.env"  // path relative to repo root
+        ENV_FILE = "secure_vault_ai/.env"
     }
 
     stages {
-
         stage('Clean Workspace') {
             steps { cleanWs() }
         }
@@ -36,7 +35,7 @@ pipeline {
                 script {
                     echo "Checking Spring Boot version..."
                     def springVersion = sh(
-                        script: "grep -m1 '<version>' secure_vault_ai/pom.xml | head -1 | sed -E 's/.*<version>(.*)<\\/version>.*/\\1/'",
+                        script: "grep -m1 '<version>' secure_vault_ai/pom.xml | sed -E 's/.*<version>(.*)<\\/version>.*/\\1/' | head -1",
                         returnStdout: true
                     ).trim()
                     if (springVersion != REQUIRED_SPRING_VERSION) {
@@ -45,10 +44,7 @@ pipeline {
                     echo "✅ Spring Boot version OK: ${springVersion}"
 
                     echo "Checking Java version..."
-                    def javaVersion = sh(
-                        script: "java -version 2>&1 | head -n 1",
-                        returnStdout: true
-                    ).trim()
+                    def javaVersion = sh(script: "java -version 2>&1 | head -n 1", returnStdout: true).trim()
                     if (!javaVersion.contains(REQUIRED_JAVA_VERSION)) {
                         error "❌ Java version mismatch. Required Java ${REQUIRED_JAVA_VERSION}"
                     }
@@ -77,8 +73,8 @@ pipeline {
                     sh """
                         mkdir -p ~/.docker
                         echo '{"credsStore": ""}' > ~/.docker/config.json
-                        /opt/homebrew/bin/aws ecr get-login-password --region ${AWS_REGION} | \
-                        /usr/local/bin/docker login --username AWS --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+                        aws ecr get-login-password --region ${AWS_REGION} | \
+                        docker login --username AWS --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
                     """
                 }
             }
@@ -87,16 +83,14 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 dir('secure_vault_ai') {
-                    sh """
-                        /usr/local/bin/docker build --platform linux/amd64 -t ${IMAGE_URI} .
-                    """
+                    sh "docker build -t ${IMAGE_URI} ."
                 }
             }
         }
 
         stage('Push Docker Image') {
             steps {
-                sh "/usr/local/bin/docker push ${IMAGE_URI}"
+                sh "docker push ${IMAGE_URI}"
             }
         }
 
@@ -111,14 +105,10 @@ pipeline {
                         ssh -o StrictHostKeyChecking=no ${EC2_HOST} '
                             aws ecr get-login-password --region ${AWS_REGION} | \
                             docker login --username AWS --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com &&
-
                             docker stop securevault || true &&
                             docker rm securevault || true &&
-
                             docker pull ${IMAGE_URI} &&
-
-                            docker run -d \
-                              --name securevault \
+                            docker run -d --name securevault \
                               --env-file ${ENV_FILE} \
                               -e SPRING_DATASOURCE_PASSWORD=$PG_PASS \
                               -e SPRING_DATA_MONGODB_URI="mongodb+srv://flaman:$MONGO_PASS@securevaultai.mx0qhvx.mongodb.net?retryWrites=true&w=majority" \
