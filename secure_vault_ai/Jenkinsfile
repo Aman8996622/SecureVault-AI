@@ -17,7 +17,7 @@ pipeline {
         EC2_HOST   = "ubuntu@13.233.32.204"
 
         REQUIRED_SPRING_VERSION = "3.4.1"
-        
+
         REQUIRED_JAVA_VERSION   = "17"
         ENV_FILE = "secure_vault_ai/.env"  // path relative to repo root
     }
@@ -82,8 +82,8 @@ pipeline {
                     )
                 ]) {
                     sh """
-                        aws ecr get-login-password --region ${AWS_REGION} | \
-                        docker login --username AWS --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+                        /opt/homebrew/bin/aws ecr get-login-password --region ${AWS_REGION} | \
+                        /usr/local/bin/docker login --username AWS --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
                     """
                 }
             }
