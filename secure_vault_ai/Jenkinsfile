@@ -14,7 +14,7 @@ pipeline {
         IMAGE_TAG  = "${BUILD_NUMBER}"
         IMAGE_URI  = "${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${IMAGE_TAG}"
 
-        EC2_HOST   = "ubuntu@13.233.32.204"
+        EC2_HOST   = "ubuntu@13.127.194.132"
 
         REQUIRED_SPRING_VERSION = "3.4.1"
         REQUIRED_JAVA_VERSION   = "17"
