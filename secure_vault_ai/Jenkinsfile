@@ -67,11 +67,7 @@ stages {
         }
     }
 
-    stage('Verify JAR') {
-        steps {
-            sh "ls -lh secure_vault_ai/target/"
-        }
-    }
+ 
 
     stage('Login to AWS ECR') {
         steps {
