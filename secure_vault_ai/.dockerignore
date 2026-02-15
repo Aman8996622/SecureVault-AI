@@ -8,3 +8,7 @@ mvnw.cmd
 .dockerignore
 HELP.md
 DATABASE_SETUP.md
+.idea/
+.vscode/
+*.iml
+*.log

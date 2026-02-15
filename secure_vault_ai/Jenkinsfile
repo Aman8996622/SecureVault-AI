@@ -1,141 +1,156 @@
 pipeline {
-    agent any
+agent any
 
-    tools {
-        maven 'Maven3'
-        jdk 'JDK17'
+```
+tools {
+    maven 'Maven3'
+    jdk 'JDK17'
+}
+
+environment {
+    AWS_REGION = "ap-south-1"
+    ACCOUNT_ID = "426315020355"
+    ECR_REPO   = "securevault"
+
+    IMAGE_TAG  = "${BUILD_NUMBER}"
+    IMAGE_URI  = "${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${IMAGE_TAG}"
+
+    EC2_HOST   = "ubuntu@13.127.194.132"
+
+    REQUIRED_SPRING_VERSION = "3.4.1"
+    REQUIRED_JAVA_VERSION   = "17"
+    ENV_FILE = "securevault-app/.env"
+
+    LOCAL_AWS_CLI = "/opt/homebrew/bin/aws"
+    LOCAL_DOCKER  = "/usr/local/bin/docker"
+
+    EC2_AWS_CLI = "/usr/local/bin/aws"
+    EC2_DOCKER  = "/usr/bin/docker"
+}
+
+stages {
+
+    stage('Clean Workspace') {
+        steps { cleanWs() }
     }
 
-    environment {
-        AWS_REGION = "ap-south-1"
-        ACCOUNT_ID = "426315020355"
-        ECR_REPO   = "securevault"
-
-        IMAGE_TAG  = "${BUILD_NUMBER}"
-        IMAGE_URI  = "${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${IMAGE_TAG}"
-
-        EC2_HOST   = "ubuntu@13.127.194.132"
-
-        REQUIRED_SPRING_VERSION = "3.4.1"
-        REQUIRED_JAVA_VERSION   = "17"
-        ENV_FILE = "securevault-app/.env" // updated path
-
-        LOCAL_AWS_CLI = "/opt/homebrew/bin/aws"
-        LOCAL_DOCKER  = "/usr/local/bin/docker"
-
-        EC2_AWS_CLI = "/usr/local/bin/aws"
-        EC2_DOCKER  = "/usr/bin/docker"
+    stage('Checkout Code') {
+        steps { checkout scm }
     }
 
-    stages {
-        stage('Clean Workspace') {
-            steps { cleanWs() }
-        }
+    stage('Validate Versions') {
+        steps {
+            script {
+                echo "Checking Spring Boot version..."
+                def springVersion = sh(
+                    script: "grep -m1 '<version>' secure_vault_ai/pom.xml | sed -E 's/.*<version>(.*)<\\/version>.*/\\1/' | head -1",
+                    returnStdout: true
+                ).trim()
 
-        stage('Checkout Code') {
-            steps { checkout scm }
-        }
-
-        stage('Validate Versions') {
-            steps {
-                script {
-                    echo "Checking Spring Boot version..."
-                    def springVersion = sh(
-                        script: "grep -m1 '<version>' secure_vault_ai/pom.xml | sed -E 's/.*<version>(.*)<\\/version>.*/\\1/' | head -1",
-                        returnStdout: true
-                    ).trim()
-                    if (springVersion != REQUIRED_SPRING_VERSION) {
-                        error "❌ Spring Boot version mismatch. Found: ${springVersion}, Required: ${REQUIRED_SPRING_VERSION}"
-                    }
-                    echo "✅ Spring Boot version OK: ${springVersion}"
-
-                    echo "Checking Java version..."
-                    def javaVersion = sh(script: "java -version 2>&1 | head -n 1", returnStdout: true).trim()
-                    if (!javaVersion.contains(REQUIRED_JAVA_VERSION)) {
-                        error "❌ Java version mismatch. Required Java ${REQUIRED_JAVA_VERSION}"
-                    }
-                    echo "✅ ${javaVersion}"
+                if (springVersion != REQUIRED_SPRING_VERSION) {
+                    error "Spring Boot version mismatch. Found: ${springVersion}"
                 }
+
+                echo "Spring Boot OK: ${springVersion}"
+
+                def javaVersion = sh(
+                    script: "java -version 2>&1 | head -n 1",
+                    returnStdout: true
+                ).trim()
+
+                if (!javaVersion.contains(REQUIRED_JAVA_VERSION)) {
+                    error "Java version mismatch"
+                }
+
+                echo "Java OK: ${javaVersion}"
             }
         }
+    }
 
-        stage('Build JAR') {
-            steps {
-                dir('secure_vault_ai') {
-                    sh 'mvn clean package -DskipTests'
-                }
+    stage('Verify JAR') {
+        steps {
+            sh "ls -lh secure_vault_ai/target/"
+        }
+    }
+
+    stage('Login to AWS ECR') {
+        steps {
+            withCredentials([
+                usernamePassword(
+                    credentialsId: 'aws-creds',
+                    usernameVariable: 'AWS_ACCESS_KEY_ID',
+                    passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                )
+            ]) {
+                sh """
+                    mkdir -p ~/.docker
+                    echo '{"credsStore": ""}' > ~/.docker/config.json
+                    ${LOCAL_AWS_CLI} ecr get-login-password --region ${AWS_REGION} | \
+                    ${LOCAL_DOCKER} login --username AWS --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+                """
             }
         }
+    }
 
-        stage('Login to AWS ECR') {
-            steps {
+    stage('Build Docker Image') {
+        steps {
+            dir('secure_vault_ai') {
+                sh """
+                ${LOCAL_DOCKER} build \
+                    --no-cache \
+                    --platform linux/amd64 \
+                    -t ${IMAGE_URI} .
+                """
+            }
+        }
+    }
+
+    stage('Push Docker Image') {
+        steps {
+            sh "${LOCAL_DOCKER} push ${IMAGE_URI}"
+        }
+    }
+
+    stage('Deploy to EC2') {
+        steps {
+            sshagent(['ec2-ssh-key']) {
                 withCredentials([
-                    usernamePassword(
-                        credentialsId: 'aws-creds',
-                        usernameVariable: 'AWS_ACCESS_KEY_ID',
-                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
-                    )
+                    string(credentialsId: 'POSTGRES_PASSWORD', variable: 'PG_PASS'),
+                    string(credentialsId: 'MONGO_PASSWORD', variable: 'MONGO_PASS')
                 ]) {
+
                     sh """
-                        mkdir -p ~/.docker
-                        echo '{"credsStore": ""}' > ~/.docker/config.json
-                        ${LOCAL_AWS_CLI} ecr get-login-password --region ${AWS_REGION} | \
-                        ${LOCAL_DOCKER} login --username AWS --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+                    ssh -o StrictHostKeyChecking=no ${EC2_HOST} '
+
+                        ${EC2_AWS_CLI} ecr get-login-password --region ${AWS_REGION} | \
+                        ${EC2_DOCKER} login --username AWS --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com &&
+
+                        if ${EC2_DOCKER} ps -a --format "{{.Names}}" | grep -Eq "^securevault\$"; then
+                            ${EC2_DOCKER} stop securevault || true
+                            ${EC2_DOCKER} rm securevault || true
+                        fi &&
+
+                        ${EC2_DOCKER} pull ${IMAGE_URI} &&
+
+                        ${EC2_DOCKER} run -d --name securevault \
+                            -e SPRING_PROFILES_ACTIVE=docker \
+                            --env-file ${ENV_FILE} \
+                            -e SPRING_DATASOURCE_PASSWORD=$PG_PASS \
+                            -e SPRING_DATA_MONGODB_URI="mongodb+srv://flaman:$MONGO_PASS@securevaultai.mx0qhvx.mongodb.net?retryWrites=true&w=majority" \
+                            -p 4000:4000 \
+                            ${IMAGE_URI}
+                    '
                     """
                 }
             }
         }
-
-        stage('Build Docker Image') {
-            steps {
-                dir('secure_vault_ai') {
-                    sh "${LOCAL_DOCKER} build --platform linux/amd64 -t ${IMAGE_URI} ."
-                }
-            }
-        }
-
-        stage('Push Docker Image') {
-            steps { sh "${LOCAL_DOCKER} push ${IMAGE_URI}" }
-        }
-
-        stage('Deploy to EC2') {
-            steps {
-                sshagent(['ec2-ssh-key']) {
-                    withCredentials([
-                        string(credentialsId: 'POSTGRES_PASSWORD', variable: 'PG_PASS'),
-                        string(credentialsId: 'MONGO_PASSWORD', variable: 'MONGO_PASS')
-                    ]) {
-                        sh """
-                        ssh -o StrictHostKeyChecking=no ${EC2_HOST} '
-                            ${EC2_AWS_CLI} ecr get-login-password --region ${AWS_REGION} | \
-                            ${EC2_DOCKER} login --username AWS --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com &&
-
-                            # Stop & remove old container if exists
-                            if ${EC2_DOCKER} ps -a --format "{{.Names}}" | grep -Eq "^securevault\$"; then
-                                ${EC2_DOCKER} stop securevault
-                                ${EC2_DOCKER} rm securevault
-                            fi &&
-
-                            # Pull latest image
-                            ${EC2_DOCKER} pull ${IMAGE_URI} &&
-
-                            # Run new container
-                            ${EC2_DOCKER} run -d --name securevault \
-                                --env-file ${ENV_FILE} \
-                                -e SPRING_DATASOURCE_PASSWORD=$PG_PASS \
-                                -e SPRING_DATA_MONGODB_URI="mongodb+srv://flaman:$MONGO_PASS@securevaultai.mx0qhvx.mongodb.net?retryWrites=true&w=majority" \
-                                -p 4000:4000 \
-                                ${IMAGE_URI}
-                        '
-                        """
-                    }
-                }
-            }
-        }
     }
+}
 
-    post {
-        success { echo "✅ Deployment Successful" }
-        failure { echo "❌ Deployment Failed" }
-    }
+post {
+    success { echo "Deployment Successful" }
+    failure { echo "Deployment Failed" }
+}
+```
+
 }
